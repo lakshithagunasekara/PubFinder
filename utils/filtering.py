@@ -4,9 +4,7 @@ import config
 import logging as log
 from openai import OpenAI
 
-client = OpenAI(
-    api_key="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")
-
+client = OpenAI(api_key=config.openai_key)
 
 def filter_duplicates(df, output_directory):
     log.info("Filtering duplicates")
