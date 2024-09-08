@@ -4,24 +4,33 @@ import zipfile
 from datetime import datetime
 import logging as log
 
+import config
 
-def prepare_directories(clear_directories):
+
+def prepare_directories():
     output_directory = 'results'
     sources_directory = 'sources'
     archive_directory = 'archive'
 
-    if clear_directories:
-        # Clear existing directories if they exist
-        for directory in [output_directory, sources_directory]:
-            if os.path.exists(directory):
-                shutil.rmtree(directory)  # Remove the directory and its contents
+    folders_to_clear = []
+    if not config.reuse["sources"]:
+        folders_to_clear.append(sources_directory)
 
-        # Create new directories
+    if not (config.reuse["abstract_responses"] or config.reuse["topics"] or config.reuse["embeddings"]):
+        folders_to_clear.append(output_directory)
+
+    for directory in folders_to_clear:
+        if os.path.exists(directory):
+            log.info(f"Clearing the directory {directory}")
+            shutil.rmtree(directory)  # Remove the directory and its contents
+
+    if not os.path.exists(output_directory):
         os.makedirs(output_directory)
+    if not os.path.exists(sources_directory):
         os.makedirs(sources_directory)
-
     if not os.path.exists(archive_directory):
         os.makedirs(archive_directory)
+
     return output_directory, sources_directory, archive_directory
 
 

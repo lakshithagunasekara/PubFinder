@@ -80,7 +80,8 @@ def populate_missing_abstracts(df, output_directory):
         log.info(f"Processing {iteration} DOI: {doi}")
 
         # Check if the abstract is missing
-        if pd.isna(row['Abstract']) or not str(row['Abstract']).strip() or row['Abstract'] == 0:
+        if pd.isna(row['Abstract']) or not str(row['Abstract']).strip() \
+                or row['Abstract'] == 0 or str(row['Abstract']).startswith("…"):
             if doi:
                 # Use cached abstract if available
                 abstract = api_response_dict.get(doi)

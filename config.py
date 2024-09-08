@@ -4,18 +4,27 @@ from dotenv import load_dotenv
 # Load environment variables from .env file
 load_dotenv()
 
-keywords = ['responsible generative AI']
-mandatory_filters = ['responsible,responsibility,ethical,ethics,trustworthy,trust,'
-                     'explainable,fair,accountable,accountability,governance,health,education,creative,impact,'
-                     'Standardization,Standardize,risk,issues,challenge,problem',
-                     'Generative,large language model,llm,AI,GPT,artificial intelligence,machine']
+keywords = ['Responsible Generative AI']
+allow_filter_by_mandatory_keywords = True
+mandatory_filters = ['responsible,ethical,ethics,governance,safety,regulation,transparent,explainable,XAI,fair,'
+                     'accountable,bias,fairness,transparency,accountability,oversight,auditing,risk,standards,'
+                     'ethical,interpretability,human-centered,trust,good,sustainable,inclusive,policy,compliance,'
+                     'harm,responsibility,transparency,robustness,trustworthiness,privacy,security,human in the loop,'
+                     'fairness',
+                     'generative,large language model,LLM,GPT,'
+                     'transformer,text generation,language model,GAN,LLAMA,Gemini'
+                     'generative modeling,diffusion model']
 
 start_year = 2020
 end_year = 2025
 sources = ['crossref', 'scopus', 'semscholar', 'gscholar', 'wos', 'masv2']
 
-allow_filter_by_optional_keywords = False
-optional_filter = ["principles", "strategies", "challenges", "issues", "limitations"]
+allow_filter_by_optional_keywords = True
+optional_filter = ["responsible Generative AI development", "challenges of Generative AI",
+                   "issues/problems with generative AI", "usecases of responsible generative AI developement"
+                   "principles of responsible Generative AI development",
+                   "Applications of responsible Generative AI development", "policies for responsible generative AI"
+                   "generative ai governance"]
 
 filter_by_citations = False
 most_recent_year_citation = 0
@@ -27,9 +36,11 @@ consider_year_for_filter = False
 elsevier_api_keys = os.getenv("ELSEVIER_API_KEYS").split(',')
 openai_key = os.getenv("OPENAI_KEY")
 
+only_cluster = True
+
 reuse = {
-    "sources": False,
-    "abstract_responses": False,
-    "topics": False,
-    "embeddings": False,
+    "sources": True,
+    "abstract_responses": True,
+    "topics": True,
+    "embeddings": True,
 }

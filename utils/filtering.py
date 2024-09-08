@@ -3,8 +3,23 @@ import pandas as pd
 import config
 import logging as log
 from openai import OpenAI
+from pydantic import BaseModel, Field
+from typing import List
+
+from utils.topics_utilts import preprocess_topic
 
 client = OpenAI(api_key=config.openai_key)
+
+
+class JournalFilterResponse(BaseModel):
+    journal_id: int
+    relevant: bool
+    tags: List[str]
+
+
+class GPTFilterResponse(BaseModel):
+    journals: List[JournalFilterResponse]
+
 
 def filter_duplicates(df, output_directory):
     log.info("Filtering duplicates")
@@ -19,6 +34,7 @@ def filter_duplicates(df, output_directory):
 
     df['Cites'] = df['Cites'].astype(int)
     df.sort_values("Cites", inplace=True, ascending=False)
+    df = df.reset_index(drop=True)
 
     df.to_csv(f'{output_directory}/2_filtered_duplicates_removed.csv', index=False)
     log.info(f"Duplicate removed file saved to {output_directory}/2_filtered_duplicates_removed.csv")
@@ -45,20 +61,22 @@ def filter_by_cites(df, output_directory):
 
     filtered_by_cites.to_csv(f'{output_directory}/3_filtered_by_citations.csv', index=False)
     log.info(f"filtered_by_cites file saved to {output_directory}/3_filtered_by_citations.csv")
-
+    filtered_by_cites = filtered_by_cites.reset_index(drop=True)
     return filtered_by_cites
 
 
 def filter_titles_by_mandatory_keywords(df, output_directory):
     log.info("Filtering titles based on keywords")
+    counter = 0
     for filter in config.mandatory_filters:
+        counter += 1
         keywords = filter.split(",")
         df_mandatory = pd.DataFrame()
         for keyword in keywords:
             df_mandatory_filtered_for_keyword_title = df[df['Title'].str.contains(keyword, na=False, case=False)]
             df_mandatory = pd.concat([df_mandatory, df_mandatory_filtered_for_keyword_title], ignore_index=True)
         df = df_mandatory
-        df_mandatory.to_csv(f'{output_directory}/4_filtered_title_{filter}.csv', index=False)
+        df_mandatory.to_csv(f'{output_directory}/4_filtered_title_{counter}.csv', index=False)
 
     df_mandatory.sort_values("Title", inplace=True)
     df_mandatory.drop_duplicates(subset=['Title', 'Year'], keep='first', inplace=True)
@@ -75,15 +93,17 @@ def filter_titles_by_mandatory_keywords(df, output_directory):
 
 def filter_abstract_by_mandatory_keywords(df, output_directory):
     log.info("Filtering based on keywords")
-
+    counter = 0
     for filter in config.mandatory_filters:
+        counter += 1
         keywords = filter.split(",")
         df_mandatory = pd.DataFrame()
         for keyword in keywords:
-            df_mandatory_filtered_abstract = df[df['Abstract'].str.contains(keyword, na=False, case=False)]
+            processed_keyword = preprocess_topic(keyword)
+            df_mandatory_filtered_abstract = df[df['Processed_Abstract'].str.contains(processed_keyword, na=False, case=False)]
             df_mandatory = pd.concat([df_mandatory, df_mandatory_filtered_abstract], ignore_index=True)
         df = df_mandatory
-        df_mandatory_filtered_abstract.to_csv(f'{output_directory}/7_filtered_abstract_{keyword}.csv', index=False)
+        df_mandatory_filtered_abstract.to_csv(f'{output_directory}/7_filtered_abstract_{counter}.csv', index=False)
 
     df_mandatory.sort_values("Title", inplace=True)
     df_mandatory.drop_duplicates(subset=['Title', 'Year'], keep='first', inplace=True)
@@ -91,6 +111,7 @@ def filter_abstract_by_mandatory_keywords(df, output_directory):
 
     df_mandatory['Cites'] = df_mandatory['Cites'].astype(int)
     df_mandatory.sort_values("Cites", inplace=True, ascending=False)
+    df_mandatory = df_mandatory.reset_index(drop=True)
 
     df_mandatory.to_csv(f'{output_directory}/8_filtered_abstract_mandatory_keywords.csv', index=False)
     log.info(f"Mandatory filtered file saved to {output_directory}/8_filtered_abstract_mandatory_keywords.csv")
@@ -117,100 +138,68 @@ def filter_by_optional_keywords(input_df, output_directory):
 
     df['Cites'] = df['Cites'].astype(int)
     df.sort_values("Cites", inplace=True, ascending=False)
-
+    df = df.reset_index(drop=True)
     df.to_csv(f'{output_directory}/9_filtered_optional_keywords.csv', index=False)
     log.info(f"Optional Filtered file saved to {output_directory}/9_filtered_optional_keywords.csv")
     return df
 
 
-def create_prompt(entries, mandatory_filters, optional_filters):
-    """
-    Creates a prompt for the LLM to determine relevance and tag entries based on filters.
-
-    Args:
-    entries (list): A list of tuples containing (Title, Abstract).
-    mandatory_filters (list): A list of mandatory keywords to check relevance against.
-    optional_filters (list): A list of optional filters to identify specific discussions.
-
-    Returns:
-    str: A formatted prompt string for the LLM.
-    """
+def classify_relevancy_gpt_batch(journals_batch, mandatory_filters, optional_filters):
     prompt = (
-        "You are a highly intelligent AI that determines if scientific papers are relevant "
-        "to a set of mandatory keywords and tags them with optional filters if applicable. "
-        "Given the following titles and abstracts, determine if each one is relevant based on "
+        f"Please read the following title and abstract pairs, determine if each one is relevant based on "
         "the mandatory keywords: {}. Additionally, identify which of the following optional "
         "filters it discusses: {}.\n\n"
+        "For each title and abstract, answer 'Relevant' or 'Irrelevant' based on the mandatory "
+        "keywords. List any applicable optional filters as well'.\n"
+        f"Return the result as a structured JSON format with 'journal_id', 'relevant' and 'tags'.\n\n"
     ).format(", ".join(mandatory_filters), ", ".join(optional_filters))
 
-    prompt += (
-        "For each title and abstract, answer 'Relevant' or 'Irrelevant' based on the mandatory "
-        "keywords. If an abstract is relevant but does not discuss any optional filters, "
-        "consider it 'Irrelevant'. List any applicable optional filters next to 'Relevant'.\n"
-        "Format your response as '1. Relevant, principles, strategies' or '2. Irrelevant'.\n\n"
+    for i, journal in enumerate(journals_batch, start=1):
+        title = journal['Title']
+        abstract = journal['Abstract']
+        prompt += f"Journal {i}:\nTitle: {title}\nAbstract: {abstract}\n\n"
+
+    response = client.beta.chat.completions.parse(
+        model="gpt-4o-2024-08-06",
+        messages=[
+            {"role": "system",
+             "content": "You are a highly intelligent AI that determines if scientific papers are relevant "
+                        "to a set of mandatory keywords and tags them with optional filters if applicable."},
+            {"role": "user", "content": prompt}
+        ],
+        response_format=GPTFilterResponse
     )
 
-    for i, (title, abstract) in enumerate(entries, start=1):
-        prompt += f"Title {i}: {title}\nAbstract {i}: {abstract}\n\n"
-
-    prompt += "Provide your answers in the specified format."
-    return prompt
+    return response.choices[0].message.parsed
 
 
-def filter_keywords_with_gpt(df, mandatory_filters, optional_filters, output_directory, batch_size=5):
-    """
-    Processes batches of entries using GPT-4 Turbo to determine relevance and optional tags.
+def filter_articles_with_gpt(df, output_directory, mandatory_filters, optional_filters):
+    batch_size = 5
+    df["Relevance"] = ""
+    df["Tags"] = ""
 
-    Args:
-    df (pd.DataFrame): DataFrame containing the entries to process.
-    mandatory_filters (list): A list of mandatory keywords to check relevance against.
-    optional_filters (list): A list of optional filters to identify specific discussions.
-    batch_size (int): Number of entries per batch.
-
-    Returns:
-    pd.DataFrame: Updated DataFrame with relevance and tags determined by GPT-4 Turbo.
-    """
-
-    # Prepare DataFrame to store results
-    df['Relevance'] = None
-    df['Tags'] = None
-
-    # Iterate over DataFrame in batches
     for i in range(0, len(df), batch_size):
-        batch = df.iloc[i:i + batch_size]
-        entries = list(zip(batch['Title'], batch['Abstract']))
-        prompt = create_prompt(entries, mandatory_filters, optional_filters)
+        batch_df = df.iloc[i:i + batch_size]
 
-        try:
-            response = client.chat.completions.create(model="gpt-4o-2024-08-06",
-                                                      messages=[
-                                                          {"role": "system", "content": "You are a helpful assistant."},
-                                                          {"role": "user", "content": prompt}
-                                                      ],
-                                                      max_tokens=500)
+        journals_batch = [
+            {"Title": row['Title'], "Abstract": row['Abstract']}
+            for _, row in batch_df.iterrows()
+        ]
 
-            # Extract and parse the LLM response
-            results = response.choices[0].message.content.splitlines()
+        gpt_response = classify_relevancy_gpt_batch(journals_batch, mandatory_filters, optional_filters)
 
-            # Update DataFrame with LLM's relevance judgments and tags
-            for j, result in enumerate(results):
-                relevance, tags = result.split(',', 1) if ',' in result else (result, '')
-                relevance = relevance.strip().split('.')[1].strip()  # Extract "Relevant" or "Irrelevant"
-                tags = tags.strip()
+        for journal_response in gpt_response.journals:
+            journal_id = i + journal_response.journal_id - 1
+            relevance = journal_response.relevant
+            tags = [tag for tag in journal_response.tags]
+            if relevance == True and len(tags) == 0:
+                relevance = False
+            df.at[journal_id, 'Relevance'] = relevance
+            df.at[journal_id, 'Tags'] = tags if tags else "None"
+            log.info(f"Processed entry {journal_id}: {relevance}, Tags: {tags}")
 
-                # If no tags are provided and the response is 'Relevant', mark it as 'Irrelevant'
-                if relevance == "Relevant" and not tags:
-                    relevance = "Irrelevant"
-
-                df.at[batch.index[j], 'Relevance'] = relevance
-                df.at[batch.index[j], 'Tags'] = tags if tags else "None"
-                log.info(f"Processed entry {batch.index[j]}: {relevance}, Tags: {tags}")
-
-        except Exception as e:
-            log.error(f"Error processing batch starting at index {i}: {e}")
-            continue
-
-    df = df[df['Relevance'] == 'Relevant']
+    df = df[df['Relevance'] == True]
+    df = df.reset_index(drop=True)
     df.to_csv(f'{output_directory}/10_filtered_keywords_with_gpt.csv', index=False)
     log.info(f"Keywords filtered with GPT saved to {output_directory}/10_filtered_keywords_with_gpt.csv")
     return df

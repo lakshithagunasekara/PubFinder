@@ -1,15 +1,5 @@
 import json
 import os
-import pandas as pd
-import numpy as np
-from sklearn.cluster import KMeans
-import logging
-from openai import OpenAI
-from matplotlib import pyplot as plt
-from matplotlib.colors import ListedColormap
-from sklearn.manifold import TSNE
-import json
-import os
 
 import numpy as np
 import pandas as pd
@@ -23,8 +13,6 @@ import logging
 from pydantic import BaseModel, Field
 from typing import List
 from sklearn.cluster import KMeans
-from sklearn.preprocessing import StandardScaler
-from sklearn.decomposition import PCA
 from matplotlib import pyplot as plt
 from matplotlib.colors import ListedColormap
 from sklearn.manifold import TSNE
@@ -102,8 +90,8 @@ def get_relevant_topics_gpt_batch(journals_batch):
     prompt = (
         f"Please read the following title and abstract pairs, and return 3 topics each for a pair that are relevant, "
         f"meaningful and provides a good understanding of the journal content. "
-        f"As these topics are for a systematic review of Responsible Generative AI, make sure the topics are well computed, "
-        f"Return the result as a structured JSON format with 'journal_id', 'title', 'abstract', and 'topics'. "
+        f"As these topics are for a systematic review, make sure the topics are well computed, "
+        f"Return the result as a structured JSON format with 'journal_id', and 'topics'. "
         "Each journal should have 1 to 3 relevant topics. Return the topics in a list of strings."
         "Do not use generic topics such as responsible AI, Generative AI, computer science. "
         "Always try to use meaningful topics which can explain the journal\n\n"
@@ -164,7 +152,7 @@ def get_topics_for_journals_df(df, output_directory):
 
             # Prepare batch data for GPT
             journals_batch = [
-                {"Title": row['Processed_Title'], "Abstract": row['Processed_Abstract']}
+                {"Title": row['Title'], "Abstract": row['Abstract']}
                 for _, row in batch_df.iterrows()
             ]
 
@@ -174,7 +162,7 @@ def get_topics_for_journals_df(df, output_directory):
             # Process and store topics for each journal
             for journal_response in gpt_response.journals:
                 journal_id = i + journal_response.journal_id - 1
-                processed_topics = [preprocess_topic(topic) for topic in journal_response.topics]
+                processed_topics = [topic for topic in journal_response.topics]
                 df.at[journal_id, 'Topics'] = ', '.join(processed_topics)
                 topic_counts = update_topic_list(processed_topics, topic_counts)
 
@@ -207,7 +195,7 @@ def apply_tsne_and_cluster(df, n_clusters, topic_embeddings, unique_topics, outp
     ]
     custom_cmap = ListedColormap(color_list)
 
-    # Apply the clustering results to the DataFrame
+    # Function to map topics to clusters
     def map_topics_to_clusters(topics_str):
         topics = [topic.strip() for topic in topics_str.split(',')]
         clusters = [topic_cluster_map.get(topic, -1) for topic in topics]  # -1 if topic not found
@@ -239,25 +227,30 @@ def apply_tsne_and_cluster(df, n_clusters, topic_embeddings, unique_topics, outp
 
         # Plot the 2D t-SNE visualization
         plt.figure(figsize=(10, 8))
-        scatter = plt.scatter(embeddings_2d[:, 0], embeddings_2d[:, 1], c=cluster_labels, cmap=custom_cmap, s=50,
-                              edgecolor='k')
         plt.title(f't-SNE visualization of {n_clusters} Topic Clusters with perplexity {perplexity}')
         plt.xlabel('t-SNE Component 1')
         plt.ylabel('t-SNE Component 2')
 
-        # Explicitly create the legend using unique cluster labels
+        # Plot the actual scatter plot
+        plt.scatter(embeddings_2d[:, 0], embeddings_2d[:, 1],
+                    c=cluster_labels, cmap=custom_cmap, s=50, edgecolor='k')
+
+        # Ensure unique_labels are correctly mapped to colors in the scatter plot
         unique_labels = np.unique(cluster_labels)
-        handles = [plt.Line2D([0], [0], marker='o', color='w', markerfacecolor=color_list[i], markersize=10) for i in
-                   unique_labels]
+
+        # Create handles dynamically using the same colormap used in scatter
+        handles = [plt.Line2D([0], [0], marker='o', color='w',
+                              markerfacecolor=custom_cmap(i / (n_clusters - 1)), markersize=10)
+                   for i in unique_labels]
+
+        # Now create the legend using these handles
         plt.legend(handles, unique_labels, title="Clusters", loc="best")
 
         # Save the plot as an image file (e.g., PNG or JPEG)
-        plot_save_path = os.path.join(output_directory, f'16_tsne_topic_clusters_{n_clusters}_perplexity_{perplexity}.png')
+        plot_save_path = os.path.join(output_directory,
+                                      f'16_tsne_topic_clusters_{n_clusters}_perplexity_{perplexity}.png')
         plt.savefig(plot_save_path, format='png', dpi=300)  # Save with high resolution
         logging.info(f"t-SNE plot for {n_clusters} clusters with perplexity {perplexity} saved to {plot_save_path}")
-
-        plt.grid(True)
-        plt.show()
 
 
 def get_topic_embeddings(unique_topics, output_directory):
@@ -336,9 +329,6 @@ def cluster_topics(embeddings, n_clusters, unique_topics):
     # Map each topic to its cluster label
     topic_cluster_map = dict(zip(unique_topics, topic_labels))
     return topic_cluster_map
-
-
-
 
 
 def print_topic_clusters(topic_cluster_map, output_file_path_clusters):
